@@ -27,7 +27,11 @@ export class Tensor {
    * @param {boolean} requires_grad - Whether to keep track of this tensor's gradients.
    * @param {string} device - Device to store Tensor. Either "gpu" or "cpu".
    */
-  constructor(data: Array<any> | number, requires_grad = false, device = 'cpu') {
+  constructor(
+    data: Array<any> | number,
+    requires_grad = false,
+    device = "cpu"
+  ) {
     if (typeof data === "object") {
       this._data = data;
     } else if (typeof data === "number") {
@@ -267,33 +271,50 @@ export class Tensor {
     // On first iteration, create CPU or GPU kernel for matmul:
     if (other.forwardKernel === null || other.batch_size != this.shape.at(-2)) {
       if (device === "gpu") {
-        // Get GPU from GPU.js:
-        const {GPU} = require('@eduardoleao052/gpu');
         // If the batch size changed, warn user and update the batch size:
-        if (other.batch_size != null){
+        if (other.batch_size != null) {
           other.batch_size = other.shape.at(-2);
           if (other.warned === false) {
-            console.warn('Testing batch size different from training batch size. JS-PyTorch recreating GPU Kernel (Less efficient)')
+            console.warn(
+              "Testing batch size different from training batch size. JS-PyTorch recreating GPU Kernel (Less efficient)"
+            );
             other.warned = true;
           }
         }
-        other.gpu = new GPU();
+        other.gpu = new GPU.GPU();
         // Define Kernel function for matmul:
-        const kernelFunc = function(this: any, a: number[][], b: number[][], len: number): number {
+        const kernelFunc = function (
+          this: any,
+          a: number[][],
+          b: number[][],
+          len: number
+        ): number {
           let sum = 0;
           for (let i = 0; i < len; i++) {
             sum += a[this.thread.y][i] * b[i][this.thread.x];
           }
           return sum;
-        }
+        };
         // Create and store the GPU kernels:
-        other.forwardKernel = other.gpu.createKernel(kernelFunc, { loopMaxIterations: other.shape.at(-2) }).setOutput([other.shape.at(-1), this.shape.at(-2)]);
-        other.backwardKernelA = other.gpu.createKernel(kernelFunc, { loopMaxIterations: other.shape.at(-1) }).setOutput([this.shape.at(-1), this.shape.at(-2)]);
-        other.backwardKernelB = other.gpu.createKernel(kernelFunc, { loopMaxIterations: this.shape.at(-2) }).setOutput([other.shape.at(-1), other.shape.at(-2)]);
+        other.forwardKernel = other.gpu
+          .createKernel(kernelFunc, { loopMaxIterations: other.shape.at(-2) })
+          .setOutput([other.shape.at(-1), this.shape.at(-2)]);
+        other.backwardKernelA = other.gpu
+          .createKernel(kernelFunc, { loopMaxIterations: other.shape.at(-1) })
+          .setOutput([this.shape.at(-1), this.shape.at(-2)]);
+        other.backwardKernelB = other.gpu
+          .createKernel(kernelFunc, { loopMaxIterations: this.shape.at(-2) })
+          .setOutput([other.shape.at(-1), other.shape.at(-2)]);
       } else {
         // Build the CPU kernel:
-        const kernelFunc = function (a: number[][], b: number[][], len: number) {
-          const out = Array(a.length).fill(0).map(() => Array(b[0].length).fill(0));
+        const kernelFunc = function (
+          a: number[][],
+          b: number[][],
+          len: number
+        ) {
+          const out = Array(a.length)
+            .fill(0)
+            .map(() => Array(b[0].length).fill(0));
           for (let i = 0; i < a.length; i++) {
             for (let j = 0; j < b[0].length; j++) {
               let currentIndex = 0;
@@ -304,7 +325,7 @@ export class Tensor {
             }
           }
           return out;
-        }
+        };
         // Store the CPU kernels:
         other.forwardKernel = kernelFunc;
         other.backwardKernelA = kernelFunc;
@@ -662,7 +683,7 @@ class MatMul {
     this.cache = [a, b];
     let aData = a.data;
     let bData = b.data;
-    
+
     if (a.shape.length < b.shape.length) {
       aData = broadcastUp(aData, bData);
     } else {
@@ -1694,7 +1715,6 @@ function _div(a: Array<any> | number, b: Array<any> | number): any {
   }
 }
 
-
 function _matmul(a: Array<any>, b: Array<any>, kernel: any): Array<any> {
   if (typeof a === "number") {
     throw new Error("Cannot perform MatMul with given shapes.");
@@ -1704,12 +1724,12 @@ function _matmul(a: Array<any>, b: Array<any>, kernel: any): Array<any> {
     return a.map((element: Array<any>, idx: number) =>
       _matmul(element, b[idx], kernel)
     );
-  // If not, try to matmul:
+    // If not, try to matmul:
   } else {
     // If dimensions align, perform matmul:
     if (a[0].length === b.length && typeof a[0][0] === "number") {
       let out = kernel(a, b, b.length);
-      out = out.map((el:number[]) => Array.from(el));
+      out = out.map((el: number[]) => Array.from(el));
       return out;
     } else {
       throw Error(
@@ -1848,16 +1868,27 @@ function _masked_fill(
 // }
 
 export function _reshape(a: Array<any>, shape: number[]) {
-  if (getShape(a).reduce((a,b)=>a*b,1) != shape.reduce((a,b)=>a*b,1)) {throw new Error('Attempting to reshape into invalid shape.')}
-  function _build(a2: any[], shape2: number[], idx: number, numberOfEls: number): any[] {
+  if (
+    getShape(a).reduce((a, b) => a * b, 1) != shape.reduce((a, b) => a * b, 1)
+  ) {
+    throw new Error("Attempting to reshape into invalid shape.");
+  }
+  function _build(
+    a2: any[],
+    shape2: number[],
+    idx: number,
+    numberOfEls: number
+  ): any[] {
     if (shape2.length > 1) {
       const emptyArray = Array(shape2[0]).fill(0);
       let offSet = idx;
-      numberOfEls = (numberOfEls / shape2[0]);
-      const myArray = emptyArray.map((_, idx) => _build(a2, shape2.slice(1), offSet + idx*numberOfEls, numberOfEls));
+      numberOfEls = numberOfEls / shape2[0];
+      const myArray = emptyArray.map((_, idx) =>
+        _build(a2, shape2.slice(1), offSet + idx * numberOfEls, numberOfEls)
+      );
       return myArray;
     } else {
-      const myArray =  a2.slice(idx,idx+numberOfEls);
+      const myArray = a2.slice(idx, idx + numberOfEls);
       return myArray;
     }
   }
@@ -1895,7 +1926,11 @@ function _tensorInitializer(
  * @param {string} device - Device to store Tensor. Either "gpu" or "cpu".
  * @returns {object} New tensor.
  */
-export function tensor(data: Array<any>, requires_grad = false, device = 'cpu'): Tensor {
+export function tensor(
+  data: Array<any>,
+  requires_grad = false,
+  device = "cpu"
+): Tensor {
   return new Tensor(data, requires_grad, device);
 }
 
@@ -1906,7 +1941,11 @@ export function tensor(data: Array<any>, requires_grad = false, device = 'cpu'):
  * @param {string} device - Device to store Tensor. Either "gpu" or "cpu".
  * @returns {object} New tensor.
  */
-export function zeros(shape: Array<number>, requires_grad = false, device = 'cpu'): Tensor {
+export function zeros(
+  shape: Array<number>,
+  requires_grad = false,
+  device = "cpu"
+): Tensor {
   return new Tensor(
     _tensorInitializer(shape, () => 0),
     requires_grad,
@@ -1921,7 +1960,11 @@ export function zeros(shape: Array<number>, requires_grad = false, device = 'cpu
  * @param {string} device - Device to store Tensor. Either "gpu" or "cpu".
  * @returns {object} New tensor.
  */
-export function ones(shape: Array<number>, requires_grad = false, device = 'cpu'): Tensor {
+export function ones(
+  shape: Array<number>,
+  requires_grad = false,
+  device = "cpu"
+): Tensor {
   return new Tensor(
     _tensorInitializer(shape, () => 1),
     requires_grad,
@@ -1936,7 +1979,11 @@ export function ones(shape: Array<number>, requires_grad = false, device = 'cpu'
  * @param {string} device - Device to store Tensor. Either "gpu" or "cpu".
  * @returns {object} New tensor.
  */
-export function tril(shape: Array<number>, requires_grad = false, device = 'cpu'): Tensor {
+export function tril(
+  shape: Array<number>,
+  requires_grad = false,
+  device = "cpu"
+): Tensor {
   const z = ones(shape, requires_grad);
   for (let i = 0; i < shape[0]; i++) {
     for (let j = 0; j < shape[0]; j++) {
@@ -1956,7 +2003,11 @@ export function tril(shape: Array<number>, requires_grad = false, device = 'cpu'
  * @param {string} device - Device to store Tensor. Either "gpu" or "cpu".
  * @returns {object} New tensor.
  */
-export function rand(shape: Array<number>, requires_grad = false, device = 'cpu'): Tensor {
+export function rand(
+  shape: Array<number>,
+  requires_grad = false,
+  device = "cpu"
+): Tensor {
   return new Tensor(
     _tensorInitializer(shape, () => Math.random()),
     requires_grad,
@@ -1975,13 +2026,13 @@ export function rand(shape: Array<number>, requires_grad = false, device = 'cpu'
 export function randn(
   shape: Array<number>,
   requires_grad = false,
-  device = 'cpu',
+  device = "cpu",
   xavier = false
 ): Tensor {
   return new Tensor(
     _tensorInitializer(shape, () => {
       const mean = Math.random() * 0.98 + 1e-3;
-      const variance = Math.random() * 0.98 + 1e-3;;
+      const variance = Math.random() * 0.98 + 1e-3;
       const num =
         Math.sqrt(-2.0 * Math.log(mean)) * Math.cos(2.0 * Math.PI * variance);
       if (xavier) {

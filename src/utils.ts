@@ -26,7 +26,7 @@ export function getShape(
     // Return shape for objects:
     return shape;
   }
-  
+
   if (typeof data[0] === "number" && Array.isArray(data)) {
     for (const element of data) {
       if (typeof element != "number") {
@@ -42,11 +42,11 @@ export function getShape(
     let elementLength = data[0].length;
     // Iterate over elements in dimention to check if all have the same length (homogenous shape):
     for (const element of data) {
-       // Throw error if the element is not a number or another iterable:
+      // Throw error if the element is not a number or another iterable:
       if (typeof element != "object" && typeof element != "number") {
         throw new Error("TypeError: the input data is not a number.");
       } else if (Array.isArray(element) && elementLength != element.length) {
-      // Throw error if the shape is inhomogenous:
+        // Throw error if the shape is inhomogenous:
         throw new Error("The requested array has an inhomogeneous shape.");
       } else if (Array.isArray(element)) {
         elementLength = element.length;

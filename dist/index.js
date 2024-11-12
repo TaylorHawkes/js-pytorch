@@ -1634,6 +1634,7 @@ class Linear extends Module {
     if (this.has_bias) {
       z = z.add(this.b);
     }
+    console.log("heyy taylor");
     return z;
   }
 }

@@ -8,7 +8,7 @@ export class Adam {
   b1: number;
   b2: number;
   eps: number;
-  
+
   /**
    * Adam optimizer class.
    * @param {(Parameter | Tensor)[]} params - List of all Parameter or Tensor (with requires_grad = True) to be optimized by Adam. "params" is usually set to nn.Module.parameters(), which automatically returns all parameters in a list form.

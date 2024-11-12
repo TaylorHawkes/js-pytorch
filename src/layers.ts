@@ -14,8 +14,7 @@
   log,
   _reshape
 } from "./tensor";
-import fs from 'fs';
-
+import fs from "fs";
 
 // Interface that contains all the types of Module's attributes:
 interface ModuleInterface {
@@ -105,7 +104,13 @@ export class Linear extends Module {
    * @param {boolean} bias - wether to include a bias term.
    * @param {boolean} xavier - Wether to use xavier initialization (divide by square root of first input dimension).
    */
-  constructor(in_size: number, out_size: number, device = 'cpu', bias = true, xavier = true) {
+  constructor(
+    in_size: number,
+    out_size: number,
+    device = "cpu",
+    bias = true,
+    xavier = true
+  ) {
     super();
     this.W = randn([in_size, out_size], true, device, xavier);
     this.b = zeros([out_size], true);
@@ -122,6 +127,7 @@ export class Linear extends Module {
     if (this.has_bias) {
       z = z.add(this.b);
     }
+    console.log("heyy taylor");
     return z;
   }
 }
@@ -153,7 +159,7 @@ export class MultiHeadSelfAttention extends Module {
     n_heads: number,
     n_timesteps: number,
     dropout_prob = 0,
-    device = 'cpu'
+    device = "cpu"
   ) {
     super();
     this.Wk = new Linear(in_size, in_size, device, true, false);
@@ -233,7 +239,13 @@ export class FullyConnected extends Module {
    * @param {string} device - Device to perform Tensor operations. Either "gpu" or "cpu".
    * @param {boolean} bias - wether to include a bias term.
    */
-  constructor(in_size: number, out_size: number, dropout_prob = 0, device: string = 'cpu', bias: boolean = true) {
+  constructor(
+    in_size: number,
+    out_size: number,
+    dropout_prob = 0,
+    device: string = "cpu",
+    bias: boolean = true
+  ) {
     super();
 
     this.l1 = new Linear(in_size, in_size * 2, device, true, bias);
@@ -278,7 +290,7 @@ export class Block extends Module {
     n_heads: number,
     n_timesteps: number,
     dropout_prob = 0,
-    device = 'cpu'
+    device = "cpu"
   ) {
     super();
     this.att = new MultiHeadSelfAttention(
@@ -290,7 +302,13 @@ export class Block extends Module {
       device
     );
     this.ln1 = new LayerNorm(in_size);
-    this.fcc = new FullyConnected(in_size, out_size, dropout_prob, device, true);
+    this.fcc = new FullyConnected(
+      in_size,
+      out_size,
+      dropout_prob,
+      device,
+      true
+    );
     this.ln2 = new LayerNorm(out_size);
   }
 
@@ -321,7 +339,7 @@ export class Embedding extends Module {
    */
   constructor(vocab_size: number, embed_size: number) {
     super();
-    this.E = randn([vocab_size, embed_size], true, 'cpu', false);
+    this.E = randn([vocab_size, embed_size], true, "cpu", false);
   }
 
   /**
@@ -353,7 +371,7 @@ export class PositionalEmbedding extends Module {
    */
   constructor(input_size: number, embed_size: number) {
     super();
-    this.E = randn([input_size, embed_size], true, 'cpu', false);
+    this.E = randn([input_size, embed_size], true, "cpu", false);
   }
 
   /**
@@ -585,11 +603,18 @@ export function save(model: Module, file: string) {
    * @param {object} obj - Objects with keys and values that we have to filter.
    * @returns {object} Filtered object.
    */
-  function recursiveReplacer(obj: { [key: string]: any; }): { [key: string]: any; }{
-    let result: { [key: string]: any; } = {};
+  function recursiveReplacer(obj: { [key: string]: any }): {
+    [key: string]: any;
+  } {
+    let result: { [key: string]: any } = {};
     for (var x in obj) {
-      if (x !== "forwardKernel" && x !== "backwardKernelA" && x !== "backwardKernelB" && x !== "gpu") {
-        if (typeof obj[x] === 'object' && !Array.isArray(obj[x])) {
+      if (
+        x !== "forwardKernel" &&
+        x !== "backwardKernelA" &&
+        x !== "backwardKernelB" &&
+        x !== "gpu"
+      ) {
+        if (typeof obj[x] === "object" && !Array.isArray(obj[x])) {
           result[x] = recursiveReplacer(obj[x]);
         } else {
           result[x] = obj[x];
@@ -598,7 +623,7 @@ export function save(model: Module, file: string) {
         result[x] = null;
       }
     }
-    return result 
+    return result;
   }
   const data = JSON.stringify(recursiveReplacer(model));
   fs.writeFileSync(file, data);
@@ -613,8 +638,8 @@ export function save(model: Module, file: string) {
 export function load(model: Module, file: string): Module {
   const loadedData = fs.readFileSync(file);
   let loadedModel = JSON.parse(loadedData.toString());
-  loadParameters(loadedModel, model)
-  return model;  
+  loadParameters(loadedModel, model);
+  return model;
 }
 
 function loadParameters(source: Module, target: Module) {
@@ -626,7 +651,6 @@ function loadParameters(source: Module, target: Module) {
       target[key]._data = source[key]._data;
       target[key].m = source[key].m;
       target[key].v = source[key].v;
-
     }
   }
 }
