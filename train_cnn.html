@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SimpleCNN in Browser</title>
+</head>
+<body>
+<script src="./gpujs/dist/gpu-browser.min.js"></script>
+<script src="./dist/js-pytorch-browser.js"></script>
+<script>
+const torch = JsPytorch.torch; 
+const nn = torch.nn;
+const optim = torch.optim;
+const device = 'gpu';
+
+// Define training hyperparameters:
+const in_channels = 3; // Assuming 3 channels (RGB) input
+const num_classes = 10; // Number of output classes for classification
+const batch_size = 32;
+const learning_rate = 0.0001;
+
+// Create CNN Module:
+class SimpleCNN extends nn.Module {
+  constructor(in_channels, num_classes, device) {
+    super();
+    // Define the layers of the CNN
+    this.conv1 = new nn.Conv2D(in_channels, 8, 3, 1, "same", 1, 1, true, device); // Convolutional layer with 32 filters
+    this.conv2 = new nn.Conv2D(8, 8, 3, 1, "same", 1, 1, true, device); // Convolutional layer with 64 filters
+    this.relu = new nn.ReLU(); // ReLU activation
+    this.pool = new nn.MaxPool2D(2, 2); // Max Pooling with a kernel size of 2x2
+
+    this.fc1 = new nn.Linear(512, 128,  device); // Fully connected layer (assuming input size is [batch, 64, 8, 8])
+    this.fc2 = new nn.Linear(128, num_classes, device); // Output layer
+    this.dropout = new nn.Dropout(0.5); // Dropout layer
+  }
+
+
+  forward(x) {
+    // Apply convolutional layers with ReLU and pooling
+
+      x = this.relu.forward(this.conv1.forward(x));
+      x = this.pool.forward(x);
+      x = this.relu.forward(this.conv2.forward(x));
+      x = this.pool.forward(x);
+
+    // Flatten the output for the fully connected layers
+    const batch = x.shape[0];
+    const flattened_dim = x.shape[1] * x.shape[2] * x.shape[3];
+    x = x.reshape([batch,flattened_dim]);
+
+    // Apply fully connected layers with ReLU activation and dropout
+    x = this.fc1.forward(x);
+    x = this.relu.forward(x);
+    x = this.fc2.forward(x);
+
+    return x;
+
+  }
+}
+
+// Instantiate your custom nn.Module:
+const model = new SimpleCNN(in_channels, num_classes, device);
+
+console.log(model);
+// Define loss function and optimizer:
+const loss_func = new nn.MSELoss();
+const optimizer = new optim.Adam(model.parameters(), learning_rate);
+
+// Instantiate sample input and output (Assuming input size is [batch, channels, height, width]):
+let x = torch.randn([batch_size,in_channels, 32, 32]); // Random input tensor (e.g., 32x32 images)
+let y = torch.zeros([batch_size,num_classes]);
+let loss;
+
+// Training Loop:
+for (let i = 0; i < 400; i++) {
+  // Forward pass through the CNN:
+  let z = model.forward(x);
+
+    // Print the first 10 weights of the first convolutional layer as a string
+  //const firstWeights = model.conv1.W._data.slice(0, 10); // Assuming _data holds the raw weight data as an array
+  //console.log(JSON.stringify(firstWeights));
+  // Check for NaN values in z and replace with 0
+  //z.data = z.data.map(value => isNaN(value) ? 0 : value);
+  loss = loss_func.forward(z, y);
+  console.log(loss.data[0]);
+  loss.backward();
+  optimizer.step();
+  optimizer.zero_grad();
+  //console.log(`Iter ${i} - Loss ${loss.data[0].toFixed(4)}`)
+}
+</script>
+</body>
+</html>

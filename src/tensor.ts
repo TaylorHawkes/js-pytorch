@@ -106,6 +106,8 @@ export class Tensor {
 
     // Add upstream gradient to this._grad:
     this._grad = new Tensor(_add(this._grad?.data, grad.data));
+      //console.log(`Gradient at tensor with shape ${this.shape}:`, this._grad);
+
 
     if (child != null) {
       const idx = this.children.indexOf(child);
@@ -439,6 +441,76 @@ export class Tensor {
     const operation = new Reshape();
     return operation.forward(this, shape);
   }
+
+/**
+ * Pads the input tensor with specified padding values.
+ * @param {Array<Array<number>>} padding - An array specifying padding for each dimension in the format [[before, after], ...].
+ * @param {number} value - Value to pad with (default is 0).
+ * @returns {Tensor} A new tensor with padding applied.
+ */
+pad(padding: Array<[number, number]>, value: number = 0): Tensor {
+  const operation = new Pad(padding);
+  return operation.forward(this, value);
+}
+
+
+set(b: number, oc: number, i: number, j: number, value: number): Tensor {
+  const operation = new Set();
+  return operation.forward(this, [b, oc, i, j], value);
+}
+
+img2col(kernel_height: number, kernel_width: number, stride: [number, number], padding: [number, number]): Tensor {
+    const operation = new Img2Col();
+    return operation.forward(this, kernel_height,kernel_width,stride,padding);
+}
+
+maxpool(kernel_size: [number, number], stride: [number, number]):Tensor {
+    const operation = new MaxPool();
+    return operation.forward(this, kernel_size, stride);
+}
+
+
+/**
+ * Gets the maximum value(s) of the Tensor, optionally over a specified dimension.
+ * @param {number | null} dim - Dimension to find the maximum value over. If null, find the maximum of the entire tensor.
+ * @param {boolean} keepdims - Whether to keep dimensions of the original tensor.
+ * @returns {Tensor} - Final tensor with maximum value(s).
+ */
+max(dim: number | null = null, keepdims = false): Tensor {
+  const operation = new Max();
+  return operation.forward(this, dim, keepdims);
+}
+
+}
+
+/**
+ * Helper function to get the indices of maximum values along a specified dimension.
+ * @param {Array<any>} data - Input multidimensional array.
+ * @param {number} dim - Dimension to find the maximum indices over.
+ * @returns {Array<any>} - Array of indices corresponding to the maximum values.
+ */
+function getMaxIndicesAlongDim(data: Array<any>, dim: number): Array<any> {
+    console.log("max indices along dim being called");
+  // This function assumes that "data" is a multidimensional array.
+  const shape = getShape(data); // Assuming getShape gives the shape of the array
+  const result = [];
+
+  // Recursively find maximum indices along the specified dimension
+  function recursiveMaxIndices(subarray: Array<any>, currentIndices: Array<number>) {
+    if (currentIndices.length === dim) {
+      // Find index of max value in this subarray
+      const maxIdx = subarray.indexOf(Math.max(...subarray));
+      result.push([...currentIndices, maxIdx]); // Store the index path
+    } else {
+      // Continue recursion deeper into the array
+      for (let i = 0; i < subarray.length; i++) {
+        recursiveMaxIndices(subarray[i], [...currentIndices, i]);
+      }
+    }
+  }
+
+  recursiveMaxIndices(data, []);
+  return result; // Return the collected indices
 }
 
 // <<< Parameter class, tensor that always tracks gradients >>> //
@@ -1458,7 +1530,34 @@ export function reshape(a: Tensor, shape: Array<any>): Tensor {
   return a.reshape(shape);
 }
 
-// <<< Recursive functions for lists >>> //
+
+function sliceRecursive( data: any, shape: Array<number>, start: Array<number>, size: Array<number>, dim: number = 0): any {
+  if (dim >= shape.length) {
+    return data; // Base case: reached scalar data
+  }
+
+  const [currentStart, currentSize] = [start[dim], size[dim]];
+
+  // Ensure current start and size are valid
+  if (currentStart < 0 || currentStart >= shape[dim]) {
+    throw new Error(`Start index ${currentStart} out of bounds for dimension ${dim}`);
+  }
+  if (currentSize <= 0 || currentStart + currentSize > shape[dim]) {
+    throw new Error(`Size ${currentSize} out of bounds for dimension ${dim}`);
+  }
+
+  // Create sliced data array
+  const slicedData = [];
+  for (let i = currentStart; i < currentStart + currentSize; i++) {
+    // Ensure data is array-like at this dimension
+    if (!Array.isArray(data)) {
+      throw new Error(`Data structure mismatch at dimension ${dim}`);
+    }
+    slicedData.push(sliceRecursive(data[i], shape, start, size, dim + 1));
+  }
+
+  return slicedData;
+}
 
 function _sum(a: Array<any>, dim: number, keepdims?: boolean): Array<any> {
   // In recursive call, when depth increases, subtract one from dim.
@@ -2241,3 +2340,523 @@ export function broadcastUp(
   }
   return inElement;
 }
+
+export class Pad {
+  cache: any;
+  padding: Array<[number, number]>;
+
+  constructor(padding: Array<[number, number]>) {
+    this.padding = padding;
+  }
+
+  forward(a: Tensor, value: number = 0): Tensor {
+    // Build cache to use in backward step:
+    this.cache = a;
+
+    // Create the padded data structure recursively
+    function createPaddedArray(
+      data: any,
+      shape: Array<number>,
+      padding: Array<[number, number]>,
+      value: number
+    ): any {
+      if (shape.length === 0) return data; // Base case: no dimensions left
+
+      const [currentDim, ...remainingShape] = shape;
+      const [padBefore, padAfter] = padding[0];
+      const newDimSize = currentDim + padBefore + padAfter;
+
+      // Create an array with new dimensions, padded where needed
+      const result = Array(newDimSize).fill(null).map((_, index) => {
+        if (index < padBefore || index >= padBefore + currentDim) {
+          // Padding region
+          return remainingShape.length > 0
+            ? createPaddedArray([], remainingShape, padding.slice(1), value)
+            : value;
+        } else {
+          // Original data region
+          const originalIndex = index - padBefore;
+          if (Array.isArray(data) && originalIndex >= 0 && originalIndex < data.length) {
+            return createPaddedArray(data[originalIndex], remainingShape, padding.slice(1), value);
+          } else {
+            // Handle out-of-bound indexing gracefully
+            return remainingShape.length > 0
+              ? createPaddedArray([], remainingShape, padding.slice(1), value)
+              : value;
+          }
+        }
+      });
+
+      return result;
+    }
+
+    // Generate the new padded data
+    const paddedData = createPaddedArray(a._data, a.shape, this.padding, value);
+
+    // Compute the new shape after padding
+    const newShape = a.shape.map((dim, i) => dim + this.padding[i][0] + this.padding[i][1]);
+
+    // Create a new Tensor
+    const z = new Tensor(paddedData, a.requires_grad, a.device);
+
+    // Connect nodes in graph
+    if (requiresGrad(a)) {
+      z.parents.push(a);
+      a.children.push(z);
+      z.operation = this;
+    }
+
+    return z;
+  }
+
+  backward(dz: Tensor, z: Tensor) {
+    // Get data from cache:
+    const a = this.cache;
+
+    // Create gradient by removing padding
+    function removePadding(
+      data: any,
+      shape: Array<number>,
+      padding: Array<[number, number]>
+    ): any {
+      if (shape.length === 0) return data;
+      const [currentDim, ...remainingShape] = shape;
+      const [padBefore, padAfter] = padding[0];
+      return data.slice(padBefore, currentDim + padBefore).map((subArray: any) =>
+        removePadding(subArray, remainingShape, padding.slice(1))
+      );
+    }
+    const gradDataWithoutPadding = removePadding(dz._data, a.shape, this.padding);
+    const gradTensor = new Tensor(gradDataWithoutPadding, false, a.device);
+    a.backward(gradTensor, z);
+  }
+}
+
+
+
+
+export class Set {
+  cache: any;
+
+  /**
+   * Sets a specific value in the tensor and returns a modified copy of the tensor.
+   * @param {Tensor} a - The original tensor.
+   * @param {number[]} indices - Indices to set the value at [b, oc, i, j].
+   * @param {number} value - Value to set.
+   * @returns {Tensor} New tensor with the value set.
+   */
+
+    forward(a: Tensor, indices: [number, number, number, number], value: number): Tensor {
+      // Cache the original tensor and indices for backward pass
+      this.cache = { a, indices, value };
+
+      // Create a deep copy of the data manually (assuming _data is a nested array)
+      const newData = a._data.map(layer => layer.map(row => row.map(cell => [...cell])));
+      const [b, oc, i, j] = indices;
+
+      // Set the value safely
+      if (Array.isArray(newData[b]) &&
+          Array.isArray(newData[b][oc]) &&
+          Array.isArray(newData[b][oc][i])) {
+        newData[b][oc][i][j] = value;
+      } else {
+        throw new Error("Invalid indexing or data structure for setting tensor value.");
+      }
+
+      // Return a new tensor
+      const z = new Tensor(newData, a.requires_grad, a.device);
+
+      // Connect nodes in graph
+      if (requiresGrad(a)) {
+        z.parents.push(a);
+        a.children.push(z);
+        z.operation = this;
+      }
+
+      return z;
+    }
+
+  backward(dz: Tensor, z: Tensor) {
+    // Get data from cache
+    const { a, indices } = this.cache;
+    const [b, oc, i, j] = indices;
+
+    // Create a gradient tensor with the same shape as the original tensor
+    const da = new Tensor(zeros(a.shape));
+
+    // Accumulate the gradient from dz into the appropriate index
+    da._data[b][oc][i][j] = dz.data[0]; // Assuming dz is scalar here for simplicity
+
+    // Pass the gradient back
+    a.backward(da, z);
+  }
+}
+
+export class Max {
+  cache: any;
+
+  /**
+   * Gets the maximum value(s) of a Tensor over a specified dimension.
+   * @param {Tensor} a - Tensor to get the maximum value from.
+   * @param {dim} dim - Dimension to find the maximum value over.
+   * @param {boolean} keepdims - Whether to keep dimensions of the original tensor.
+   * @returns {Tensor} - Tensor containing the maximum values.
+   */
+  forward(a: Tensor, dim: number | null = null, keepdims = false): Tensor {
+    // Build cache to use in the backward step
+    this.cache = [a, dim, keepdims];
+
+    let maxData, maxIndices;
+    if (dim === null) {
+      // Get the maximum over all elements
+      maxData = Math.max(...a.data.flat(Infinity));
+      maxIndices = a.data.flat(Infinity).indexOf(maxData);
+      if (keepdims) {
+        const outputShape = Array(a.shape.length).fill(1);
+        maxData = [maxData];
+        maxData = reshapeToShape(maxData, outputShape);
+      }
+    } else {
+      // Handle maximum over the specified dimension
+      maxData = getMaxAlongDim(a._data, dim);
+      maxIndices = getMaxIndicesAlongDim(a._data, dim);
+      if (keepdims) {
+        maxData = keepDims(maxData, dim);
+      }
+    }
+
+    const z = new Tensor(maxData, a.requires_grad);
+
+    // Connect nodes in the computation graph
+    if (requiresGrad(a)) {
+      z.parents.push(a);
+      a.children.push(z);
+      z.operation = this;
+    }
+
+    // Store indices for backpropagation
+    this.cache.push(maxIndices);
+
+    return z;
+  }
+
+  backward(dz: Tensor, z: Tensor) {
+    // Get data from cache
+    const [a, dim, keepdims, maxIndices] = this.cache;
+
+    // Find gradients relative to "a", and pass it downstream
+    if (requiresGrad(a)) {
+      // Create a gradient tensor with zeros
+      let grad = zeros(a.shape);
+
+      // Assign gradients to max positions
+      if (dim === null) {
+        grad.data[maxIndices] = dz.data[0];
+      } else {
+        assignMaxGradients(grad, dz, maxIndices, dim);
+      }
+
+      a.backward(new Tensor(grad), z);
+    }
+  }
+}
+
+/**
+ * Utility function to get maximum values along a specified dimension.
+ * @param {Array<any>} data - Data to find the max from.
+ * @param {number} dim - Dimension to find the max along.
+ * @returns {Array<any>} - Maximum values along the specified dimension.
+ */
+function getMaxAlongDim(data: Array<any>, dim: number): Array<any> {
+  // Implementation of max logic along a specific dimension
+  // Example logic (assuming data is properly structured):
+  return data.map(subarray => Math.max(...subarray));
+}
+
+/**
+ * Utility function to get indices of maximum values along a specified dimension.
+ * @param {Array<any>} data - Data to find the max indices from.
+ * @param {number} dim - Dimension to find the max indices along.
+ * @returns {Array<any>} - Indices of maximum values.
+ */
+//  function getMaxIndicesAlongDim(data: Array<any>, dim: number): Array<any> {
+//    // Implementation to find indices of the max values
+//    return data.map(subarray => subarray.indexOf(Math.max(...subarray)));
+//  }
+
+/**
+ * Utility function to keep dimensions when keepdims=true.
+ * @param {Array<any>} data - Data to reshape.
+ * @param {number} dim - Dimension to keep.
+ * @returns {Array<any>} - Data with kept dimensions.
+ */
+function keepDims(data: Array<any>, dim: number): Array<any> {
+  // Example implementation to reshape data to keep dimensions
+  return data.map(val => [val]);
+}
+
+/**
+ * Utility function to assign gradients to the max positions.
+ * @param {Tensor} grad - Gradient tensor to update.
+ * @param {Tensor} dz - Incoming gradient.
+ * @param {Array<any>} indices - Indices of max values.
+ * @param {number} dim - Dimension along which the max operation was performed.
+ */
+function assignMaxGradients(grad: Tensor, dz: Tensor, indices: Array<any>, dim: number) {
+  // Example implementation to assign gradients to max indices
+  for (let i = 0; i < indices.length; i++) {
+    grad.data[i][indices[i]] = dz.data[i];
+  }
+}
+
+export class Flatten {
+  cache: any;
+
+  /**
+   * Flattens the input Tensor into a one-dimensional array.
+   * @param {Tensor} a - Input tensor to be flattened.
+   * @returns {Tensor} - New flattened tensor.
+   */
+  forward(a: Tensor): Tensor {
+    // Build cache to use in backward step:
+    this.cache = a;
+
+    // Flatten the data while preserving the order of elements:
+    const flatData = a.data.flat(Infinity); // Flattens any dimensional tensor to 1D
+
+    // Create new tensor with flattened data:
+    const z = new Tensor(flatData, requiresGrad(a));
+
+    // Connect nodes in graph:
+    if (requiresGrad(a)) {
+      z.parents.push(a);
+      a.children.push(z);
+      z.operation = this;
+    }
+
+    return z;
+  }
+
+  backward(dz: Tensor, z: Tensor) {
+    // Get data from cache:
+    const a = this.cache;
+
+    // Find gradients relative to "a", and pass them downstream:
+    if (requiresGrad(a)) {
+      // Reshape the gradient to match the original shape of "a":
+      const reshapedGrad = dz.reshape(a.shape);
+      a.backward(reshapedGrad, z);
+    }
+  }
+}
+
+
+export class MaxPool {
+  cache: any;
+
+  forward(a: Tensor, kernel_size: [number, number], stride: [number, number]): Tensor {
+    const [batch, channels, height, width] = a.shape;
+    const [kh, kw] = kernel_size;
+    const [sh, sw] = stride;
+
+    const out_height = Math.floor((height - kh) / sh + 1);
+    const out_width = Math.floor((width - kw) / sw + 1);
+    const outputData = new Array(batch).fill(0).map(() =>
+      new Array(channels).fill(0).map(() =>
+        new Array(out_height).fill(0).map(() => new Array(out_width).fill(0))
+      )
+    );
+
+    // Store max indices for backpropagation
+    const maxIndices = new Array(batch).fill(0).map(() =>
+      new Array(channels).fill(0).map(() =>
+        new Array(out_height).fill(0).map(() => new Array(out_width).fill([0, 0]))
+      )
+    );
+
+    // Perform max pooling operation using plain arrays
+    for (let b = 0; b < batch; b++) {
+      for (let c = 0; c < channels; c++) {
+        for (let i = 0; i < out_height; i++) {
+          for (let j = 0; j < out_width; j++) {
+            const h_start = i * sh;
+            const w_start = j * sw;
+            const h_end = h_start + kh;
+            const w_end = w_start + kw;
+
+            // Extract the region to pool
+            let max_val = -Infinity;
+            let max_idx = [0, 0];
+            for (let ki = h_start; ki < h_end; ki++) {
+              for (let kj = w_start; kj < w_end; kj++) {
+                if (ki >= 0 && ki < height && kj >= 0 && kj < width) {
+                  const val = a.data[b][c][ki][kj];
+                  if (val > max_val) {
+                    max_val = val;
+                    max_idx = [ki - h_start, kj - w_start]; // Store relative indices
+                  }
+                }
+              }
+            }
+
+            outputData[b][c][i][j] = max_val;
+            maxIndices[b][c][i][j] = max_idx; // Store indices relative to the window
+          }
+        }
+      }
+    }
+
+    // Create output tensor
+    this.cache = { x: a, maxIndices, kernel_size, stride };
+
+    const z = new Tensor(outputData, requiresGrad(a));
+    if (a instanceof Tensor && requiresGrad(a)) {
+      z.parents.push(a);
+      a.children.push(z);
+    }
+
+    z.operation = this;
+
+    return z;
+  }
+
+  backward(dz: Tensor, z: Tensor) {
+    const { x, maxIndices, kernel_size, stride } = this.cache;
+    const [kh, kw] = kernel_size;
+    const [sh, sw] = stride;
+    const [batch, channels, out_height, out_width] = dz.shape;
+
+    // Initialize gradient tensor for input
+    const dx = new Array(batch).fill(0).map(() =>
+      new Array(channels).fill(0).map(() =>
+        new Array(x.shape[2]).fill(0).map(() => new Array(x.shape[3]).fill(0))
+      )
+    );
+
+    // Propagate gradients based on stored max indices
+    for (let b = 0; b < batch; b++) {
+      for (let c = 0; c < channels; c++) {
+        for (let i = 0; i < out_height; i++) {
+          for (let j = 0; j < out_width; j++) {
+            const [h_idx, w_idx] = maxIndices[b][c][i][j];
+            const h_start = i * sh;
+            const w_start = j * sw;
+
+            // Assign gradient to the max index position
+            dx[b][c][h_start + h_idx][w_start + w_idx] += dz.data[b][c][i][j];
+          }
+        }
+      }
+    }
+
+    // Use the `backward()` call to propagate gradients further
+    if (x.requires_grad) {
+      const dxTensor = new Tensor(dx);
+      x.backward(dxTensor, z);
+    }
+  }
+
+}
+
+
+
+
+
+export class Img2Col {
+  cache: any;
+
+  forward(a: Tensor, kernel_height: number, kernel_width: number, stride: [number, number], padding:  [number, number]): Tensor {
+    this.cache = [a, kernel_height, kernel_width, stride, padding]; // Cache all relevant data
+
+    const [batch, channels, height, width] = a.shape;
+    const out_height = Math.floor((height + 2 * padding[0] - kernel_height) / stride[0]) + 1;
+    const out_width = Math.floor((width + 2 * padding[1] - kernel_width) / stride[1]) + 1;
+
+    const col_data = [];
+
+
+    for (let b = 0; b < batch; b++) {
+      for (let i = 0; i < out_height; i++) {
+        for (let j = 0; j < out_width; j++) {
+
+          const patch = [];
+          for (let c = 0; c < channels; c++) {
+            for (let kh = 0; kh < kernel_height; kh++) {
+              for (let kw = 0; kw < kernel_width; kw++) {
+
+                const h_idx = i * stride[0] - padding[0] + kh;
+                const w_idx = j * stride[1] - padding[1] + kw;
+                if (h_idx >= 0 && h_idx < height && w_idx >= 0 && w_idx < width) {
+                  patch.push(a.data[b][c][h_idx][w_idx]);
+                } else {
+                  patch.push(0); // Zero-padding
+                }
+              }
+            }
+          }
+          col_data.push(patch);
+        }
+      }
+    }
+
+    const z = new Tensor(col_data,requiresGrad(a));
+    if (a instanceof Tensor &&  requiresGrad(a)) {
+      z.parents.push(a);
+      a.children.push(z);
+    }
+
+    z.operation = this;
+
+    return z;
+  }
+
+
+backward(dz: Tensor, z: Tensor) {
+  const [a, kernel_height, kernel_width, stride, padding] = this.cache;
+  const [batch, channels, height, width] = a.shape;
+  const out_height = Math.floor((height + 2 * padding[0] - kernel_height) / stride[0]) + 1;
+  const out_width = Math.floor((width + 2 * padding[1] - kernel_width) / stride[1]) + 1;
+
+  // Initialize gradient tensor for dx with the same shape as input a
+  const dx = new Tensor(new Array(batch).fill(0).map(() =>
+    new Array(channels).fill(0).map(() =>
+      new Array(height).fill(0).map(() => new Array(width).fill(0))
+    )
+  ));
+
+  // Calculate the number of elements in each patch (channels * kernel_height * kernel_width)
+  const patch_size = channels * kernel_height * kernel_width;
+
+  let col_index = 0;
+  for (let b = 0; b < batch; b++) {
+    for (let i = 0; i < out_height; i++) {
+      for (let j = 0; j < out_width; j++) {
+        // Extract the gradient patch for this output position
+        const gradient_patch = dz.data[col_index];
+        let patch_index = 0; // Index to iterate through the patch values
+
+        for (let c = 0; c < channels; c++) {
+          for (let kh = 0; kh < kernel_height; kh++) {
+            for (let kw = 0; kw < kernel_width; kw++) {
+              const h_idx = i * stride[0] - padding[0] + kh;
+              const w_idx = j * stride[1] - padding[1] + kw;
+
+              if (h_idx >= 0 && h_idx < height && w_idx >= 0 && w_idx < width) {
+                // Accumulate the gradient from the current patch position
+                dx.data[b][c][h_idx][w_idx] += gradient_patch[patch_index];
+              }
+              patch_index++;
+            }
+          }
+        }
+
+        col_index++;
+      }
+    }
+  }
+  if (a.requires_grad) {
+    a.backward(dx, z);
+  }
+}
+}
+
